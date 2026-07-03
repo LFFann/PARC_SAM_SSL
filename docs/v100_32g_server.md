@@ -2,13 +2,13 @@
 
 Target server paths:
 
-- Dataset root: `/root/autodl-tmp/echoData/260513_data_labeled30pct`
+- Dataset root: `/root/autodl-tmp/echoData/260703_data_labeled30pct`
 - SAM ViT-B checkpoint: `/root/autodl-tmp/sam_vit_b_01ec64.pth`
 
 Expected dataset layout:
 
 ```text
-/root/autodl-tmp/echoData/260513_data_labeled30pct/
+/root/autodl-tmp/echoData/260703_data_labeled30pct/
   labeled/image
   labeled/mask
   unlabeled/image
@@ -49,7 +49,7 @@ python train.py \
   --config configs/parc_sam_ssl_v100_32g_echo.yaml \
   --device cuda \
   --max-iterations 12000 \
-  --data-root /root/autodl-tmp/echoData/260513_data_labeled30pct \
+  --data-root /root/autodl-tmp/echoData/260703_data_labeled30pct \
   --sam-checkpoint /root/autodl-tmp/sam_vit_b_01ec64.pth \
   --output-dir outputs/PARC_SAM_SSL_v2_V100_32G_echoData
 ```
@@ -82,7 +82,7 @@ python train.py \
   --config configs/parc_sam_ssl_v100_32g_echo.yaml \
   --device cuda \
   --max-iterations 12000 \
-  --data-root /root/autodl-tmp/echoData/260513_data_labeled30pct \
+  --data-root /root/autodl-tmp/echoData/260703_data_labeled30pct \
   --sam-checkpoint /root/autodl-tmp/sam_vit_b_01ec64.pth \
   --output-dir outputs/PARC_SAM_SSL_v2_V100_32G_echoData_bs2
 ```

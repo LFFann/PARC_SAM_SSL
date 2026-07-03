@@ -38,9 +38,9 @@ The smoke config explicitly uses a surrogate SAM proposal path so the training l
 
 ## Real Training
 
-On the V100 32G server, the default script expects:
+On the server, the default V100/3090 scripts expect:
 
-- dataset: `/root/autodl-tmp/echoData/260513_data_labeled30pct`
+- dataset: `/root/autodl-tmp/echoData/260703_data_labeled30pct`
 - SAM ViT-B checkpoint: `/root/autodl-tmp/sam_vit_b_01ec64.pth`
 
 ```bash
@@ -54,6 +54,15 @@ Common overrides:
 MAX_ITERATIONS=18000 OUTPUT_DIR=outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_V100_32G_echoData CUDA_VISIBLE_DEVICES=0 bash scripts/train_v100_32g_echo.sh
 RUN_DIR=outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_V100_32G_echoData SPLIT=test bash scripts/test_v100_32g_echo.sh
 ```
+
+For an RTX 3090 24G server:
+
+```bash
+bash scripts/train_3090_24g_echo.sh
+bash scripts/test_3090_24g_echo.sh
+```
+
+Run the test script after training has produced `checkpoints/best.pt` or `checkpoints/final.pt`.
 
 ## Outputs
 

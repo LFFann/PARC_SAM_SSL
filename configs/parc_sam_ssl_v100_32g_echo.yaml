@@ -7,7 +7,7 @@ experiment:
   save_interval: 1000
 
 data:
-  root: /root/autodl-tmp/echoData/260513_data_labeled30pct
+  root: /root/autodl-tmp/echoData/260703_data_labeled30pct
   dataset_name: null
   num_classes: 3
   in_channels: 3

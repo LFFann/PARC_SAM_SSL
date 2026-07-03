@@ -111,7 +111,7 @@ bash scripts/test_v100_32g_echo.sh
 
 Default paths:
 
-- dataset: `/root/autodl-tmp/echoData/260513_data_labeled30pct`
+- dataset: `/root/autodl-tmp/echoData/260703_data_labeled30pct`
 - SAM checkpoint: `/root/autodl-tmp/sam_vit_b_01ec64.pth`
 - output: `outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_V100_32G_echoData`
 

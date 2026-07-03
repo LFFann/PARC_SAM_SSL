@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+from PIL import Image
+from torch.utils.data import DataLoader
 
 from parc_sam.models import PARCStudent
+from parc_sam.engine.evaluator import evaluate
 from parc_sam.engine.visualization import TrainingVisualizer
 from parc_sam.losses import uncertainty_paced_consistency_loss, weighted_pseudo_loss
 from parc_sam.sam import SAMProposalEngine
@@ -171,3 +174,32 @@ def test_training_visualizer_writes_outputs(tmp_path):
     assert (tmp_path / "visualizations" / "diagnostic").exists()
     assert (tmp_path / "visualizations" / "failure").exists()
     assert (tmp_path / "visualizations" / "manifest.jsonl").exists()
+
+
+def test_evaluator_writes_color_and_overlay_predictions(tmp_path):
+    class FixedModel(nn.Module):
+        def forward(self, image):
+            b, _, h, w = image.shape
+            logits = image.new_zeros((b, 3, h, w))
+            logits[:, 0] = 0.2
+            logits[:, 1, : h // 2, : w // 2] = 4.0
+            logits[:, 2, h // 2 :, w // 2 :] = 4.0
+            return logits
+
+    image = torch.zeros(3, 16, 16)
+    image[0] = 0.4
+    image[1] = 0.5
+    image[2] = 0.6
+    mask = torch.zeros(16, 16, dtype=torch.long)
+    mask[:8, :8] = 1
+    mask[8:, 8:] = 2
+    loader = DataLoader([{"image": image, "mask": mask, "id": "case_a"}], batch_size=1)
+    metrics = evaluate(FixedModel(), loader, num_classes=3, device="cpu", save_dir=tmp_path)
+    assert metrics["avg_dice"] > 0.99
+    for folder in ["pred_mask", "gt_mask", "image", "pred_color", "gt_color", "pred_overlay", "gt_overlay"]:
+        assert (tmp_path / folder / "case_a.png").exists()
+    pred_color = Image.open(tmp_path / "pred_color" / "case_a.png")
+    overlay = Image.open(tmp_path / "pred_overlay" / "case_a.png")
+    assert pred_color.mode == "RGB"
+    assert overlay.mode == "RGB"
+    assert len(pred_color.getcolors(maxcolors=256 * 256)) >= 3

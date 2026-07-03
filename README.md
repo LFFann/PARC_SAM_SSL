@@ -76,7 +76,14 @@ outputs/<run>/
   resolved_config.json
   checkpoints/best.pt
   checkpoints/final.pt
-  predictions/
+  predictions/ or prediction_test/
+    image/
+    pred_mask/       # raw class-index PNG
+    gt_mask/         # raw class-index PNG
+    pred_color/      # palette-colored prediction
+    gt_color/        # palette-colored ground truth
+    pred_overlay/    # prediction overlaid on image
+    gt_overlay/      # ground truth overlaid on image
   visualizations/
 ```
 

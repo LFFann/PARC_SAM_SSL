@@ -1,0 +1,91 @@
+experiment:
+  name: PARC_SAM_SSL_Smoke
+  output_dir: outputs/smoke_cpu
+  seed: 7
+  log_interval: 1
+  val_interval: 2
+  save_interval: 4
+
+data:
+  root: synthetic_data
+  dataset_name: smoke
+  num_classes: 3
+  in_channels: 3
+  image_size: 64
+  num_workers: 0
+
+model:
+  base_channels: 8
+  dropout: 0.0
+  feature_dim: 32
+
+sam:
+  enabled: true
+  allow_surrogate_without_checkpoint: true
+  checkpoint: missing_sam_for_smoke.pth
+  model_type: vit_b
+  image_size: 128
+  min_prompt_area: 4
+  min_sam_confidence: 0.45
+
+train:
+  device: cpu
+  max_iterations: 4
+  batch_size_labeled: 2
+  batch_size_unlabeled: 2
+  lr: 0.001
+  weight_decay: 0.0
+  ema_decay: 0.9
+  amp: false
+  grad_clip: 1.0
+
+loss:
+  supervised: 1.0
+  pseudo: 0.5
+  proposal_set: 0.2
+  prototype: 0.05
+  correlation: 0.02
+  sam_alignment: 0.0
+  min_pseudo_weight: 0.05
+  pseudo_on_singletons_only: true
+
+risk:
+  alpha: 0.2
+  min_pixels_per_class: 8
+  min_quantile: 0.02
+  max_quantile: 0.95
+  max_foreground_quantile: 0.90
+  prior_momentum: 0.8
+  class_balance_power: 0.5
+  teacher_confidence: 0.4
+  max_candidate_set_size: 2
+  agreement_bonus: 0.1
+  conflict_penalty: 0.2
+  safe_negative_threshold: 0.03
+
+target:
+  target_mode: set_valued
+  use_risk: true
+  use_sam: true
+  use_prototype: true
+  use_correlation: true
+  use_alignment: false
+  foreground_guard: true
+  min_foreground_participation: 0.02
+  foreground_rescue_confidence: 0.25
+  foreground_min_weight: 0.10
+
+prototype:
+  momentum: 0.8
+  temperature: 0.1
+  min_pixels: 4
+
+visualization:
+  enabled: true
+  interval: 2
+  max_images: 1
+  panel_size: 128
+  min_healthy_foreground_ratio: 0.01
+  max_healthy_background_only_ratio: 0.98
+  max_healthy_singleton_ratio: 0.995
+  min_student_entropy: 0.02

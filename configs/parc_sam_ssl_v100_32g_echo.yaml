@@ -1,0 +1,101 @@
+experiment:
+  name: PARC_SAM_SSL_v2_V100_32G_echoData
+  output_dir: outputs/PARC_SAM_SSL_v2_V100_32G_echoData
+  seed: 2026
+  log_interval: 10
+  val_interval: 200
+  save_interval: 1000
+
+data:
+  root: /root/autodl-tmp/echoData/260513_data_labeled30pct
+  dataset_name: null
+  num_classes: 3
+  in_channels: 3
+  image_size: 256
+  ignore_index: 255
+  labeled_subdir: labeled
+  unlabeled_subdir: unlabeled
+  val_subdir: val
+  test_subdir: test
+  image_dir_name: image
+  mask_dir_name: mask
+  num_workers: 4
+
+model:
+  base_channels: 48
+  dropout: 0.08
+  feature_dim: 160
+
+sam:
+  enabled: true
+  allow_surrogate_without_checkpoint: false
+  checkpoint: /root/autodl-tmp/sam_vit_b_01ec64.pth
+  model_type: vit_b
+  source: auto
+  image_size: 1024
+  min_prompt_area: 12
+  min_sam_confidence: 0.48
+  detach_sam: true
+
+train:
+  device: cuda
+  max_iterations: 12000
+  batch_size_labeled: 6
+  batch_size_unlabeled: 4
+  lr: 0.0008
+  weight_decay: 0.0001
+  ema_decay: 0.996
+  amp: true
+  grad_clip: 5.0
+  warmup_iterations: 500
+
+loss:
+  supervised: 1.0
+  pseudo: 0.9
+  proposal_set: 0.45
+  prototype: 0.18
+  correlation: 0.08
+  sam_alignment: 0.12
+  min_pseudo_weight: 0.05
+  pseudo_on_singletons_only: true
+
+risk:
+  alpha: 0.12
+  min_pixels_per_class: 48
+  min_quantile: 0.02
+  max_quantile: 0.94
+  max_foreground_quantile: 0.82
+  prior_momentum: 0.92
+  class_balance_power: 0.60
+  teacher_confidence: 0.58
+  max_candidate_set_size: 2
+  agreement_bonus: 0.18
+  conflict_penalty: 0.45
+  safe_negative_threshold: 0.025
+
+target:
+  target_mode: set_valued
+  use_risk: true
+  use_sam: true
+  use_prototype: true
+  use_correlation: true
+  use_alignment: true
+  foreground_guard: true
+  min_foreground_participation: 0.025
+  foreground_rescue_confidence: 0.32
+  foreground_min_weight: 0.12
+
+prototype:
+  momentum: 0.96
+  temperature: 0.08
+  min_pixels: 24
+
+visualization:
+  enabled: true
+  interval: 200
+  max_images: 2
+  panel_size: 192
+  min_healthy_foreground_ratio: 0.01
+  max_healthy_background_only_ratio: 0.98
+  max_healthy_singleton_ratio: 0.995
+  min_student_entropy: 0.02

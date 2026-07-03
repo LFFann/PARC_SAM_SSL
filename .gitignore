@@ -1,0 +1,40 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Training outputs and generated data
+outputs/
+synthetic_data/
+runs/
+wandb/
+tensorboard/
+*.log
+
+# Model weights and large binary artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.pkl
+*.npy
+*.npz
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# Local OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from parc_sam.models import PARCStudent
 from parc_sam.engine.visualization import TrainingVisualizer
+from parc_sam.losses import uncertainty_paced_consistency_loss, weighted_pseudo_loss
 from parc_sam.sam import SAMProposalEngine
 from parc_sam.ssl import ClassConditionalRiskController, ProposalSetBuilder, SemanticPrototypeMemory
 
@@ -37,6 +38,65 @@ def test_proposal_builder_with_surrogate_sam():
     assert targets["pseudo"].shape == (2, 16, 16)
     assert targets["candidate_set"].shape == probs.shape
     assert targets["weight"].min() >= 0
+
+
+def test_area_guard_prevents_all_foreground_singletons():
+    risk = ClassConditionalRiskController(num_classes=3)
+    risk.pixel_prior = torch.tensor([0.96, 0.02, 0.02])
+    risk.q_per_class = torch.tensor([0.20, 0.66, 0.66])
+    teacher = torch.zeros(1, 3, 32, 32)
+    teacher[:, 0] = 0.04
+    teacher[:, 1] = 0.93
+    teacher[:, 2] = 0.03
+    sam = {"valid": True, "prob": teacher.clone(), "iou": torch.ones(1, 2) * 0.9}
+    builder = ProposalSetBuilder(
+        3,
+        {
+            "use_risk": True,
+            "use_sam": True,
+            "use_prototype": False,
+            "max_candidate_set_size": 2,
+            "teacher_confidence": 0.6,
+            "min_sam_confidence": 0.5,
+            "class_area_guard": True,
+            "max_foreground_area_multiplier": 2.0,
+            "max_foreground_area_floor": 0.02,
+            "max_foreground_area_ceiling": 0.08,
+            "area_guard_min_pixels": 4,
+            "area_guard_weight": 0.0,
+        },
+    )
+    targets = builder.build(teacher, risk, sam)
+    stats = targets["stats"]
+    assert stats["area_guard_ratio"] > 0.80
+    assert stats["class_1_pseudo_ratio"] < 0.10
+    assert stats["class_1_singleton_ratio"] < 0.10
+    assert targets["reliable"].float().mean() < 0.20
+
+
+def test_weighted_pseudo_loss_zero_weight_is_zero():
+    logits = torch.randn(2, 3, 8, 8)
+    pseudo = torch.randint(0, 3, (2, 8, 8))
+    weight = torch.zeros(2, 8, 8)
+    loss = weighted_pseudo_loss(logits, pseudo, weight, num_classes=3)
+    assert loss.item() == 0.0
+
+
+def test_uncertainty_paced_consistency_loss_runs_with_candidate_sets():
+    logits = torch.randn(2, 3, 8, 8, requires_grad=True)
+    target_prob = torch.softmax(torch.randn(2, 3, 8, 8), dim=1)
+    candidate_set = target_prob > 0.25
+    loss = uncertainty_paced_consistency_loss(
+        logits,
+        target_prob,
+        candidate_set,
+        ramp=0.25,
+        min_weight=0.05,
+        ambiguity_bonus=0.7,
+    )
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert logits.grad is not None
 
 
 def test_prototype_memory_logits():
@@ -95,6 +155,7 @@ def test_training_visualizer_writes_outputs(tmp_path):
         "strong_u": torch.rand(1, 3, 32, 32),
         "unlabeled_ids": ["unlab"],
         "teacher_prob": torch.softmax(torch.randn(1, 3, 32, 32), dim=1),
+        "prompt_prob": torch.softmax(torch.randn(1, 3, 32, 32), dim=1),
         "student_prob": torch.softmax(torch.randn(1, 3, 32, 32), dim=1),
         "sam_prob": torch.softmax(torch.randn(1, 3, 32, 32), dim=1),
         "pseudo": torch.randint(0, 3, (1, 32, 32)),

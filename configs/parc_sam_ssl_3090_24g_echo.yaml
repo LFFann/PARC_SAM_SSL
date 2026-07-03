@@ -1,6 +1,6 @@
 experiment:
-  name: PARC_SAM_SSL_v4_ProtoPrompt_UPSC_V100_32G_echoData
-  output_dir: outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_V100_32G_echoData
+  name: PARC_SAM_SSL_v4_ProtoPrompt_UPSC_RTX3090_24G_echoData
+  output_dir: outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_RTX3090_24G_echoData
   seed: 2026
   log_interval: 10
   val_interval: 200
@@ -22,9 +22,9 @@ data:
   num_workers: 4
 
 model:
-  base_channels: 48
+  base_channels: 40
   dropout: 0.08
-  feature_dim: 160
+  feature_dim: 144
 
 sam:
   enabled: true
@@ -36,37 +36,37 @@ sam:
   min_prompt_area: 12
   min_sam_confidence: 0.60
   min_prompt_confidence: 0.62
-  max_prompt_area_ratio: 0.16
-  prompt_topk_area_ratio: 0.040
+  max_prompt_area_ratio: 0.14
+  prompt_topk_area_ratio: 0.035
   empty_prompt_as_sam: false
   sam_background_weight: 0.45
-  sam_foreground_weight: 0.65
-  sam_iou_min: 0.42
+  sam_foreground_weight: 0.62
+  sam_iou_min: 0.44
   sam_iou_power: 1.0
   detach_sam: true
 
 train:
   device: cuda
-  max_iterations: 18000
-  batch_size_labeled: 6
-  batch_size_unlabeled: 4
-  lr: 0.0005
+  max_iterations: 22000
+  batch_size_labeled: 4
+  batch_size_unlabeled: 2
+  lr: 0.0004
   weight_decay: 0.0001
   ema_decay: 0.997
   amp: true
   grad_clip: 5.0
-  warmup_iterations: 2400
-  unsup_start_iterations: 500
+  warmup_iterations: 2800
+  unsup_start_iterations: 600
   unsup_ramp: sigmoid
 
 loss:
   supervised: 1.0
-  pseudo: 0.30
+  pseudo: 0.28
   proposal_set: 0.22
   uncertainty_consistency: 0.18
   prototype: 0.12
-  correlation: 0.05
-  sam_alignment: 0.03
+  correlation: 0.04
+  sam_alignment: 0.025
   min_pseudo_weight: 0.06
   min_uncertainty_weight: 0.06
   ambiguity_bonus: 0.70
@@ -77,10 +77,10 @@ risk:
   min_pixels_per_class: 48
   min_quantile: 0.02
   max_quantile: 0.90
-  max_foreground_quantile: 0.58
+  max_foreground_quantile: 0.56
   prior_momentum: 0.95
-  class_balance_power: 0.55
-  teacher_confidence: 0.66
+  class_balance_power: 0.60
+  teacher_confidence: 0.67
   max_candidate_set_size: 2
   agreement_bonus: 0.12
   conflict_penalty: 0.55
@@ -94,25 +94,25 @@ target:
   use_prototype_prompt: true
   use_correlation: true
   use_alignment: true
-  prompt_teacher_weight: 0.45
-  prompt_prototype_weight: 0.55
-  prompt_temperature: 0.85
-  prompt_max_foreground_ratio: 0.12
-  prompt_min_foreground_confidence: 0.42
+  prompt_teacher_weight: 0.48
+  prompt_prototype_weight: 0.52
+  prompt_temperature: 0.90
+  prompt_max_foreground_ratio: 0.10
+  prompt_min_foreground_confidence: 0.44
   foreground_guard: true
   min_foreground_participation: 0.015
-  foreground_rescue_confidence: 0.42
+  foreground_rescue_confidence: 0.44
   foreground_min_weight: 0.10
   class_area_guard: true
-  max_foreground_area_multiplier: 5.0
+  max_foreground_area_multiplier: 4.5
   max_foreground_area_floor: 0.015
-  max_foreground_area_ceiling: 0.12
+  max_foreground_area_ceiling: 0.10
   area_guard_min_pixels: 64
   area_guard_weight: 0.0
-  prototype_evidence_weight: 0.75
+  prototype_evidence_weight: 0.78
 
 prototype:
-  momentum: 0.96
+  momentum: 0.965
   temperature: 0.08
   min_pixels: 24
 
@@ -122,7 +122,7 @@ visualization:
   max_images: 2
   panel_size: 192
   min_healthy_foreground_ratio: 0.01
-  max_healthy_foreground_ratio: 0.35
+  max_healthy_foreground_ratio: 0.30
   max_healthy_background_only_ratio: 0.98
-  max_healthy_singleton_ratio: 0.92
+  max_healthy_singleton_ratio: 0.90
   min_student_entropy: 0.015

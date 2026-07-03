@@ -62,6 +62,80 @@ class ProposalSetBuilder:
             candidate.scatter_(1, rescued_class.unsqueeze(1), rescue.unsqueeze(1))
         return candidate, rescue
 
+    def _sam_evidence_weight(self, sam_prob: torch.Tensor, sam_out: dict) -> torch.Tensor:
+        weight = torch.ones_like(sam_prob)
+        weight[:, 0] = float(self.config.get("sam_background_weight", 0.35))
+        fg_weight = float(self.config.get("sam_foreground_weight", 0.70))
+        if self.num_classes <= 1:
+            return weight
+        sam_iou = sam_out.get("iou") if isinstance(sam_out, dict) else None
+        if isinstance(sam_iou, torch.Tensor) and sam_iou.numel() > 0:
+            sam_iou = sam_iou.to(sam_prob.device).detach().float()
+            if sam_iou.ndim == 2 and sam_iou.shape[1] >= self.num_classes - 1:
+                min_iou = float(self.config.get("sam_iou_min", 0.40))
+                power = float(self.config.get("sam_iou_power", 1.0))
+                denom = max(1e-6, 1.0 - min_iou)
+                quality = ((sam_iou[:, : self.num_classes - 1] - min_iou) / denom).clamp(0.0, 1.0)
+                quality = quality.pow(power).view(sam_prob.shape[0], self.num_classes - 1, 1, 1)
+                weight[:, 1:] = fg_weight * quality
+                return weight
+        weight[:, 1:] = fg_weight
+        return weight
+
+    def _area_limit_for_class(self, prior: float) -> float:
+        floor = float(self.config.get("max_foreground_area_floor", 0.02))
+        multiplier = float(self.config.get("max_foreground_area_multiplier", 6.0))
+        ceiling = float(self.config.get("max_foreground_area_ceiling", 0.30))
+        return max(floor, min(ceiling, prior * multiplier))
+
+    def _apply_area_guard(
+        self,
+        candidate: torch.Tensor,
+        pseudo: torch.Tensor,
+        evidence: torch.Tensor,
+        risk: ClassConditionalRiskController,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, float]]:
+        area_guard = torch.zeros_like(pseudo, dtype=torch.bool)
+        area_stats: dict[str, float] = {}
+        if self.num_classes <= 1 or not bool(self.config.get("class_area_guard", True)):
+            return candidate, pseudo, evidence, area_guard, area_stats
+
+        prior = risk.pixel_prior.to(evidence.device).float()
+        _, _, h, w = evidence.shape
+        pixels_per_image = h * w
+        min_pixels = int(self.config.get("area_guard_min_pixels", 16))
+        candidate = candidate.clone()
+        for class_idx in range(1, self.num_classes):
+            limit_ratio = self._area_limit_for_class(float(prior[class_idx].detach().cpu()))
+            limit_pixels = max(min_pixels, int(round(limit_ratio * pixels_per_image)))
+            cls_guard = torch.zeros_like(pseudo, dtype=torch.bool)
+            for batch_idx in range(pseudo.shape[0]):
+                cls_mask = pseudo[batch_idx] == class_idx
+                cls_count = int(cls_mask.sum().detach().cpu())
+                if cls_count <= limit_pixels:
+                    continue
+                scores = evidence[batch_idx, class_idx].masked_fill(~cls_mask, -1e6).flatten()
+                keep_idx = scores.topk(min(limit_pixels, scores.numel())).indices
+                keep = torch.zeros_like(scores, dtype=torch.bool)
+                keep[keep_idx] = True
+                keep = keep.view(h, w) & cls_mask
+                excess = cls_mask & ~keep
+                if excess.any():
+                    cls_guard[batch_idx] = excess
+                    candidate[batch_idx, 0][excess] = True
+                    candidate[batch_idx, class_idx][excess] = True
+            area_guard = area_guard | cls_guard
+            area_stats[f"class_{class_idx}_area_limit"] = float(limit_ratio)
+            area_stats[f"class_{class_idx}_area_guard_ratio"] = float(cls_guard.float().mean().detach().cpu())
+
+        if area_guard.any():
+            candidate_mass = candidate.float()
+            ambiguous = candidate_mass / candidate_mass.sum(dim=1, keepdim=True).clamp_min(1.0)
+            evidence = torch.where(area_guard.unsqueeze(1), ambiguous, evidence)
+            pseudo = evidence.argmax(dim=1)
+        area_stats["area_guard_ratio"] = float(area_guard.float().mean().detach().cpu())
+        return candidate, pseudo, evidence, area_guard, area_stats
+
     def _stats(
         self,
         candidate: torch.Tensor,
@@ -72,8 +146,10 @@ class ProposalSetBuilder:
         conflict: torch.Tensor,
         low_reliability: torch.Tensor,
         rescue: torch.Tensor,
+        area_guard: torch.Tensor,
         sam_valid: bool,
         risk: ClassConditionalRiskController,
+        extra: dict[str, float] | None = None,
     ) -> dict[str, float | bool]:
         stats: dict[str, float | bool] = {
             "proposal_singleton_ratio": float(singleton.float().mean().detach().cpu()),
@@ -83,9 +159,12 @@ class ProposalSetBuilder:
             "sam_used": bool(sam_valid),
             "risk_low_ratio": float(low_reliability.float().mean().detach().cpu()),
             "foreground_rescue_ratio": float(rescue.float().mean().detach().cpu()),
+            "area_guard_ratio": float(area_guard.float().mean().detach().cpu()),
             "foreground_candidate_ratio": float(candidate[:, 1:].any(dim=1).float().mean().detach().cpu()) if self.num_classes > 1 else 0.0,
             "background_only_ratio": float((~candidate[:, 1:].any(dim=1)).float().mean().detach().cpu()) if self.num_classes > 1 else 0.0,
         }
+        if extra:
+            stats.update(extra)
         q = risk.q_per_class.detach().cpu()
         prior = risk.pixel_prior.detach().cpu()
         balance = risk.class_balance_weights().detach().cpu()
@@ -114,30 +193,34 @@ class ProposalSetBuilder:
         device = teacher_prob.device
         candidate, low_reliability = self._risk_candidates(teacher_prob, risk)
         evidence = teacher_prob.clone()
-        evidence_sources = 1.0
+        evidence_sources = torch.ones_like(evidence)
+        extra_stats: dict[str, float] = {}
 
         sam_valid = bool(self.config.get("use_sam", True) and sam_out and sam_out.get("valid", False) and "prob" in sam_out)
         if sam_valid:
             sam_prob = sam_out["prob"].to(device).detach()
-            sam_conf = sam_prob.max(dim=1, keepdim=True).values
-            sam_candidate = sam_prob >= float(self.config.get("min_sam_confidence", 0.5))
+            sam_weight = self._sam_evidence_weight(sam_prob, sam_out)
+            sam_conf = (sam_prob * sam_weight).max(dim=1, keepdim=True).values
+            sam_candidate = (sam_prob >= float(self.config.get("min_sam_confidence", 0.5))) & (sam_weight > 0)
             empty = sam_candidate.sum(dim=1, keepdim=True) == 0
             if empty.any():
                 sam_candidate = sam_candidate.clone()
                 sam_candidate.scatter_(1, sam_prob.argmax(dim=1, keepdim=True), True)
             intersect = candidate & sam_candidate
             candidate = torch.where(intersect.sum(dim=1, keepdim=True) > 0, intersect, candidate | sam_candidate)
-            evidence = evidence + sam_prob * sam_conf
-            evidence_sources = evidence_sources + sam_conf
+            evidence = evidence + sam_prob * sam_weight
+            evidence_sources = evidence_sources + sam_weight
             sam_label = sam_prob.argmax(dim=1)
+            extra_stats["sam_weight_mean"] = float(sam_weight.mean().detach().cpu())
         else:
             sam_prob = None
             sam_label = None
 
         if bool(self.config.get("use_prototype", True)) and prototype_logits is not None:
             proto_prob = torch.softmax(prototype_logits.detach(), dim=1)
-            evidence = evidence + proto_prob
-            evidence_sources = evidence_sources + 1.0
+            proto_weight = float(self.config.get("prototype_evidence_weight", 1.0))
+            evidence = evidence + proto_weight * proto_prob
+            evidence_sources = evidence_sources + proto_weight
             proto_candidate = proto_prob >= float(self.config.get("teacher_confidence", 0.6))
             candidate = candidate | proto_candidate
 
@@ -156,6 +239,9 @@ class ProposalSetBuilder:
             candidate = self._cap_candidate_set(candidate, evidence)
             candidate, rescue = self._foreground_rescue(candidate, evidence)
 
+        candidate, pseudo, evidence, area_guard, area_stats = self._apply_area_guard(candidate, pseudo, evidence, risk)
+        extra_stats.update(area_stats)
+
         teacher_conf, teacher_label = teacher_prob.max(dim=1)
         evidence_conf = evidence.max(dim=1).values
         agreement = teacher_label == pseudo
@@ -173,13 +259,16 @@ class ProposalSetBuilder:
                 base_weight.clamp_min(float(self.config.get("foreground_min_weight", 0.15))),
                 base_weight,
             )
+        if area_guard.any():
+            guarded_weight = float(self.config.get("area_guard_weight", 0.0))
+            base_weight = torch.where(area_guard, base_weight.new_full(base_weight.shape, guarded_weight), base_weight)
         base_weight = base_weight.clamp(0.0, 1.0)
-        reliable = (base_weight >= 0.05) & ~conflict
+        reliable = (base_weight >= 0.05) & ~conflict & ~area_guard
         singleton = candidate.sum(dim=1) == 1
 
         negative_set = evidence < float(self.config.get("safe_negative_threshold", 0.03))
         negative_set = negative_set & ~candidate
-        stats = self._stats(candidate, pseudo, base_weight, negative_set, singleton, conflict, low_reliability, rescue, sam_valid, risk)
+        stats = self._stats(candidate, pseudo, base_weight, negative_set, singleton, conflict, low_reliability, rescue, area_guard, sam_valid, risk, extra_stats)
         return {
             "pseudo": pseudo.detach(),
             "weight": base_weight.detach(),
@@ -187,6 +276,7 @@ class ProposalSetBuilder:
             "negative_set": negative_set.detach(),
             "reliable": reliable.detach(),
             "singleton": singleton.detach(),
+            "area_guard": area_guard.detach(),
             "soft_target": evidence.detach(),
             "stats": stats,
         }

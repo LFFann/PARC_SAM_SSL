@@ -12,8 +12,8 @@ if ! [[ "${MKL_NUM_THREADS:-4}" =~ ^[0-9]+$ ]]; then
   export MKL_NUM_THREADS=4
 fi
 
-CONFIG="${CONFIG:-configs/parc_sam_ssl_v100_32g_echo.yaml}"
-RUN_DIR="${RUN_DIR:-outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_V100_32G_echoData}"
+CONFIG="${CONFIG:-configs/parc_sam_ssl_3090_24g_echo.yaml}"
+RUN_DIR="${RUN_DIR:-outputs/PARC_SAM_SSL_v4_ProtoPrompt_UPSC_RTX3090_24G_echoData}"
 CHECKPOINT="${CHECKPOINT:-${RUN_DIR}/checkpoints/best.pt}"
 SPLIT="${SPLIT:-test}"
 SAVE_DIR="${SAVE_DIR:-${RUN_DIR}/prediction_${SPLIT}}"

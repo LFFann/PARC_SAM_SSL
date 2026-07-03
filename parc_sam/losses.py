@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -27,6 +29,8 @@ def supervised_segmentation_loss(logits: torch.Tensor, target: torch.Tensor, num
 def weighted_pseudo_loss(logits: torch.Tensor, pseudo: torch.Tensor, weight: torch.Tensor, num_classes: int) -> torch.Tensor:
     ce_map = F.cross_entropy(logits, pseudo.long(), reduction="none")
     weight = weight.float().clamp_min(0.0)
+    if weight.sum() <= 0:
+        return logits.new_tensor(0.0)
     ce = (ce_map * weight).sum() / weight.sum().clamp_min(1.0)
     dice = dice_loss_from_logits(logits, pseudo, num_classes, weight > 0)
     return ce + dice
@@ -47,6 +51,37 @@ def negative_set_loss(logits: torch.Tensor, negative_set: torch.Tensor, weight: 
     penalty = (prob * negative_set.float()).sum(dim=1)
     weight = weight.float().clamp_min(0.0)
     return (penalty * weight).sum() / weight.sum().clamp_min(1.0)
+
+
+def normalized_entropy(prob: torch.Tensor) -> torch.Tensor:
+    classes = max(1, int(prob.shape[1]))
+    entropy = -(prob.clamp_min(1e-6) * prob.clamp_min(1e-6).log()).sum(dim=1)
+    if classes > 1:
+        entropy = entropy / math.log(classes)
+    return entropy.clamp(0.0, 1.0)
+
+
+def uncertainty_paced_consistency_loss(
+    logits: torch.Tensor,
+    target_prob: torch.Tensor,
+    candidate_set: torch.Tensor | None = None,
+    ramp: float = 1.0,
+    min_weight: float = 0.05,
+    ambiguity_bonus: float = 0.50,
+) -> torch.Tensor:
+    target_prob = target_prob.detach().float().clamp_min(1e-6)
+    target_prob = target_prob / target_prob.sum(dim=1, keepdim=True).clamp_min(1e-6)
+    log_prob = torch.log_softmax(logits.float(), dim=1)
+    kl_map = F.kl_div(log_prob, target_prob, reduction="none").sum(dim=1)
+    entropy = normalized_entropy(target_prob)
+    pace = float(max(0.0, min(1.0, ramp)))
+    pixel_weight = (1.0 - pace) * entropy + pace * (1.0 - entropy)
+    if candidate_set is not None:
+        candidate_size = candidate_set.float().sum(dim=1)
+        ambiguous = (candidate_size > 1).float()
+        pixel_weight = pixel_weight * (1.0 + float(ambiguity_bonus) * ambiguous)
+    pixel_weight = pixel_weight.clamp_min(float(min_weight))
+    return (kl_map * pixel_weight).sum() / pixel_weight.sum().clamp_min(1.0)
 
 
 def correlation_consistency_loss(features: torch.Tensor, target_prob: torch.Tensor, sample_pixels: int = 512) -> torch.Tensor:
@@ -80,4 +115,3 @@ def masked_cosine_alignment(student_features: torch.Tensor, sam_embeddings: torc
         t_vec = (sam * m).sum(dim=(2, 3), keepdim=True) / denom
         losses.append(1.0 - (s_vec * t_vec).sum(dim=1).mean())
     return torch.stack(losses).mean()
-

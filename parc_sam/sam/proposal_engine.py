@@ -129,7 +129,16 @@ class SAMProposalEngine(nn.Module):
         b, _, h, w = images.shape
         prompts = self._build_prompts(teacher_prob, self.image_size)
         if prompts["image_index"].numel() == 0:
-            return self._surrogate(images, teacher_prob)
+            if bool(self.config.get("empty_prompt_as_sam", False)):
+                return self._surrogate(images, teacher_prob)
+            return {
+                "valid": False,
+                "prob": teacher_prob.detach(),
+                "iou": None,
+                "sam_embeddings": None,
+                "source": "empty_prompts",
+                "prompt_count": 0,
+            }
 
         sam_images = F.interpolate(images, size=(self.image_size, self.image_size), mode="bilinear", align_corners=False)
         mean = torch.tensor([123.675, 116.28, 103.53], device=device).view(1, 3, 1, 1) / 255.0
@@ -218,7 +227,20 @@ class SAMProposalEngine(nn.Module):
                 neg_point = torch.tensor([0.0, 0.0], device=device)
             for class_idx in range(1, classes):
                 cls = prob[bi, class_idx]
+                min_prompt_conf = float(self.config.get("min_prompt_confidence", self.config.get("min_sam_confidence", 0.5)))
+                if float(cls.max().detach().cpu()) < min_prompt_conf:
+                    continue
                 hard = cls > max(float(self.config.get("min_sam_confidence", 0.5)), float(cls.mean()))
+                max_area_ratio = float(self.config.get("max_prompt_area_ratio", 0.35))
+                topk_area_ratio = float(self.config.get("prompt_topk_area_ratio", min(max_area_ratio, 0.08)))
+                hard_ratio = float(hard.float().mean().detach().cpu())
+                if max_area_ratio > 0 and hard_ratio > max_area_ratio:
+                    flat = cls.flatten()
+                    k = max(self.min_prompt_area, int(round(topk_area_ratio * flat.numel())))
+                    top_idx = flat.topk(min(k, flat.numel())).indices
+                    limited = torch.zeros_like(flat, dtype=torch.bool)
+                    limited[top_idx] = True
+                    hard = limited.view(h, w)
                 if int(hard.sum()) >= self.min_prompt_area:
                     yy, xx = torch.where(hard)
                     x0 = xx.min().float()
@@ -232,6 +254,8 @@ class SAMProposalEngine(nn.Module):
                     flat_idx = cls.flatten().argmax()
                     pos_y = (flat_idx // w).float()
                     pos_x = (flat_idx % w).float()
+                    hard = torch.zeros_like(cls, dtype=torch.bool)
+                    hard.flatten()[flat_idx] = True
                     pad = max(h, w) * 0.15
                     x0 = (pos_x - pad).clamp(0, w - 1)
                     x1 = (pos_x + pad).clamp(0, w - 1)
@@ -247,7 +271,7 @@ class SAMProposalEngine(nn.Module):
                 boxes.append(box)
                 points.append(torch.stack([pos, neg], dim=0))
                 labels.append(torch.tensor([1, 0], device=device, dtype=torch.long))
-                masks.append(cls.unsqueeze(0))
+                masks.append((cls * hard.float()).unsqueeze(0))
         if not image_indices:
             empty_long = torch.empty(0, device=device, dtype=torch.long)
             return {

@@ -155,6 +155,7 @@ class TrainingVisualizer:
         weak = _to_numpy_image(payload["weak_u"][idx])
         strong = _to_numpy_image(payload["strong_u"][idx])
         teacher_prob = payload["teacher_prob"][idx].detach().cpu()
+        prompt_prob = payload["prompt_prob"][idx].detach().cpu() if payload.get("prompt_prob") is not None else teacher_prob
         student_prob = payload["student_prob"][idx].detach().cpu()
         sam_prob = payload["sam_prob"][idx].detach().cpu() if payload.get("sam_prob") is not None else teacher_prob
         candidate = payload["candidate_set"][idx].detach().cpu()
@@ -163,7 +164,10 @@ class TrainingVisualizer:
         weight = payload["weight"][idx].detach().cpu()
         reliable = payload["reliable"][idx].detach().cpu()
         singleton = payload["singleton"][idx].detach().cpu()
+        area_guard = payload.get("area_guard")
+        area_guard = area_guard[idx].detach().cpu() if isinstance(area_guard, torch.Tensor) else torch.zeros_like(singleton)
         teacher_pred = teacher_prob.argmax(dim=0)
+        prompt_pred = prompt_prob.argmax(dim=0)
         student_pred = student_prob.argmax(dim=0)
         sam_pred = sam_prob.argmax(dim=0)
         set_size = candidate.float().sum(dim=0)
@@ -172,6 +176,7 @@ class TrainingVisualizer:
             ("weak image", weak),
             ("strong image", strong),
             ("teacher", _overlay(weak, _colorize_mask(teacher_pred, self.num_classes))),
+            ("prompt prior", _overlay(weak, _colorize_mask(prompt_pred, self.num_classes))),
             ("SAM proposal", _overlay(weak, _colorize_mask(sam_pred, self.num_classes))),
             ("candidate pseudo", _overlay(weak, _colorize_mask(pseudo, self.num_classes))),
             ("student pred", _overlay(strong, _colorize_mask(student_pred, self.num_classes))),
@@ -180,6 +185,7 @@ class TrainingVisualizer:
         ]
         diag_panels = [
             ("teacher entropy", _heatmap(_entropy(teacher_prob))),
+            ("prompt entropy", _heatmap(_entropy(prompt_prob))),
             ("student entropy", _heatmap(_entropy(student_prob))),
             ("SAM confidence", _heatmap(sam_prob.max(dim=0).values)),
             ("soft target confidence", _heatmap(payload["soft_target"][idx].detach().cpu().max(dim=0).values)),
@@ -187,6 +193,7 @@ class TrainingVisualizer:
             ("negative classes", _heatmap(negative_size)),
             ("reliable pixels", _heatmap(reliable.float())),
             ("singleton pixels", _heatmap(singleton.float())),
+            ("area guard", _heatmap(area_guard.float())),
         ]
         records = []
         paper_path = self.output_dir / "visualizations" / "paper" / f"iter_{iteration:06d}_{sample_id}_unlabeled.png"
